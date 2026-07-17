@@ -2,22 +2,11 @@
 Ball-on-Plate Simulation
 -------------------------------------------------------------------
 Pure-Python simulation of 2-axis PID control balancing a ball on a
-tilting plate, driven by two servos (X-axis, Y-axis). Meant to be
-run and tuned entirely in software before the physical rig (Arduino
-+ MG996R servos + resistive touchscreen) is built. Swapping in real
-hardware later just means replacing the "read position" / "command
+tilting plate, driven by two servos (X-axis, Y-axis).  Swapping in real
+hardware later: replacie the "read position" / "command
 servo" calls in the control loop with serial reads/writes.
 
-Physics notes:
-- Ball is modeled as a solid sphere rolling without slipping, so the
-  effective acceleration along the plate is (5/7) * g * sin(theta)
-  rather than g * sin(theta) -- accounts for the ball's rotational
-  inertia, which real ball-on-plate rigs need to account for.
-- Servo commands are clamped to the mechanical angle limit AND rate
-  limited (a real servo can't jump instantly to a new angle).
-- Sample rate is set to 200 Hz, a realistic loop rate for a Python
-  process reading Arduino over serial (2000 Hz, as in the earlier
-  draft, is unrealistic once serial I/O is in the loop).
+
 """
 
 import numpy as np
@@ -130,7 +119,7 @@ def run_simulation(kpx=120, kix=0.5, kdx=15, kpy=80, kiy=0.5, kdy=15,
 
     # Ball's starting position (m) and velocity (m/s) on the plate.
     x, y = start_x, start_y
-    vx, vy = 5.0, 5.0
+    vx, vy = 1.0, -1.0
 
     # Log everything so it can be plotted/animated after the loop.
     history = {"t": [], "x": [], "y": [], "servo_x": [], "servo_y": []}

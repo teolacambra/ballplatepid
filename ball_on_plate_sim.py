@@ -73,34 +73,66 @@ class PID:
 
 
 class Servo:
-    """Angle-clamped, rate-limited actuator model."""
+    """
+    Angle-clamped, rate-limited actuator model.
+
+    A real servo can't (a) rotate past its mechanical limit or (b) snap
+    instantly to a new angle -- it moves at some max deg/s. Both matter
+    for this sim: without the angle clamp, a big PID output would command
+    an unrealistic angle and, once past 90 degrees, sin(angle) starts
+    folding back on itself, which flips the sign of the restoring force
+    and makes the system diverge. Without the rate limit, the ball would
+    react to instantaneous tilt changes a physical servo could never
+    actually produce.
+    """
 
     def __init__(self, max_angle=SERVO_MAX_ANGLE, max_rate=SERVO_MAX_RATE):
-        self.angle = 0.0
+        self.angle = 0.0          # current commanded angle, deg (starts level)
         self.max_angle = max_angle
         self.max_rate = max_rate
 
     def command(self, target_angle, dt):
+        # Step 1: clamp the angle to what the servo can physically reach.
         target_angle = float(np.clip(target_angle, -self.max_angle, self.max_angle))
+
+        # Step 2: limit how far the servo can move this timestep, based on its
+        # max slew rate. E.g. at 300 deg/s and dt=1/200s, it can move at most
+        # 1.5 deg per step, regardless of how far away target_angle is.
         max_step = self.max_rate * dt
         delta = float(np.clip(target_angle - self.angle, -max_step, max_step))
+
+        # Step 3: apply that bounded step to the servo's current angle.
         self.angle += delta
         return self.angle
 
 
 def run_simulation(kpx=120, kix=0.5, kdx=15, kpy=80, kiy=0.5, kdy=15,
                     start_x=0.09, start_y=-0.08):
+    """
+    Run one full simulation and return the time history.
+
+    X and Y are controlled independently -- each axis gets its own PID
+    and its own servo, since tilting the plate about the X axis only
+    affects the ball's X motion (and same for Y). 
+
+    start_x/start_y set how far off-center the ball starts (meters),
+    so you can see how the controller recovers from a disturbance.
+    """
+    # Two independent PID loops, one per axis. 
     x_pid = PID(kpx, kix, kdx, setpoint=0.0,
                 output_limits=(-SERVO_MAX_ANGLE, SERVO_MAX_ANGLE))
     y_pid = PID(kpy, kiy, kdy, setpoint=0.0,
                 output_limits=(-SERVO_MAX_ANGLE, SERVO_MAX_ANGLE))
 
+    # Two independent servo models, one per axis.
     servo_x = Servo()
     servo_y = Servo()
 
+    # Ball's starting position (m) and velocity (m/s) on the plate.
     x, y = start_x, start_y
-    vx, vy = 0.0, 0.0
+    vx, vy = 5.0, 5.0
 
+    # Log everything so it can be plotted/animated after the loop.
     history = {"t": [], "x": [], "y": [], "servo_x": [], "servo_y": []}
     t = 0.0
     n_steps = int(SIM_LENGTH * SAMPLE_RATE)
@@ -108,9 +140,12 @@ def run_simulation(kpx=120, kix=0.5, kdx=15, kpy=80, kiy=0.5, kdy=15,
     for _ in range(n_steps):
         # --- control loop (this is the part that talks to Arduino
         #     over serial once hardware exists) ---
+        # Each PID looks at the ball's current position on its axis and
+        # returns a desired tilt angle (deg) to drive position to 0.
         x_cmd = x_pid.compute(x, DT)
         y_cmd = y_pid.compute(y, DT)
-        # now use the PID outputs to command the servos, which will update their angles
+        # Hand that desired angle to the servo model, which clamps/rate-limits
+        # it to what the real actuator could do.
         servo_x.command(x_cmd, DT)
         servo_y.command(y_cmd, DT)
 
@@ -118,14 +153,16 @@ def run_simulation(kpx=120, kix=0.5, kdx=15, kpy=80, kiy=0.5, kdy=15,
         ax = BALL_INERTIA_FACTOR * G * np.sin(np.radians(servo_x.angle))
         ay = BALL_INERTIA_FACTOR * G * np.sin(np.radians(servo_y.angle))
 
+        # Basic Euler integration: acceleration -> velocity -> position.
         vx += ax * DT
         vy += ay * DT
-        vx *= 0.999   # rolling friction
+        vx *= 0.999   # rolling friction -- small per-step velocity decay
         vy *= 0.999
 
         x += vx * DT
         y += vy * DT
 
+        # Record this step for the plots/animation.
         t += DT
         history["t"].append(t)
         history["x"].append(x)
@@ -133,6 +170,7 @@ def run_simulation(kpx=120, kix=0.5, kdx=15, kpy=80, kiy=0.5, kdy=15,
         history["servo_x"].append(servo_x.angle)
         history["servo_y"].append(servo_y.angle)
 
+        # Stop early if the ball rolls off the edge of the plate.
         if abs(x) > PLATE_HALF_SIZE or abs(y) > PLATE_HALF_SIZE:
             print(f"Ball fell off the plate at t={t:.3f}s")
             break

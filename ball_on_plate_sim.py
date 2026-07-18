@@ -119,7 +119,7 @@ def run_simulation(kpx=120, kix=0.5, kdx=15, kpy=80, kiy=0.5, kdy=15,
 
     # Ball's starting position (m) and velocity (m/s) on the plate.
     x, y = start_x, start_y
-    vx, vy = 1.0, -1.0
+    vx, vy = 0.2, -0.2
 
     # Log everything so it can be plotted/animated after the loop.
     history = {"t": [], "x": [], "y": [], "servo_x": [], "servo_y": []}
